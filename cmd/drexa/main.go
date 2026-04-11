@@ -19,7 +19,7 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 	srv := app.NewServer()
 
 	httpServer := &http.Server{
-		Addr:         net.JoinHostPort(app.HOST, app.PORT),
+		Addr:         net.JoinHostPort(app.Host, app.Port),
 		Handler:      srv,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,

@@ -2,14 +2,13 @@ package domain
 
 import (
 	"errors"
-	"os/user"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthProvider interface {
-	Authenticate() user.User
+	Authenticate() User
 	GetProviderType() string
 }
 
