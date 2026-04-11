@@ -14,11 +14,16 @@ import (
 )
 
 func run(ctx context.Context, w io.Writer, args []string) error {
+	app.ConnecttoDB()
+
 	srv := app.NewServer()
 
 	httpServer := &http.Server{
-		Addr:    net.JoinHostPort(app.HOST, app.PORT),
-		Handler: srv,
+		Addr:         net.JoinHostPort(app.HOST, app.PORT),
+		Handler:      srv,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {

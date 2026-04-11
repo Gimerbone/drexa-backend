@@ -1,4 +1,6 @@
 package app
 
-const HOST = "0.0.0.0"
-const PORT = "8080"
+import "os"
+
+var Host = os.Getenv("HOST")
+var Port = os.Getenv("PORT")
