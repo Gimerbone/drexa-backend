@@ -7,7 +7,10 @@ import (
 
 func addRoutes(
 	mux *http.ServeMux,
-	authHandler auth.AuthHandlers,
+	authUc *auth.AuthUsecase,
+	authProviderUC *auth.AuthProviderUsecase,
+	kycUc *auth.KycUsecase,
+	adminKycUc *auth.AdminKycUsecase,
 ) {
 	mux.Handle("/", http.NotFoundHandler())
 

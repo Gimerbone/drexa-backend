@@ -12,7 +12,8 @@ import (
 	"time"
 
 	"drexa/internal/auth"
-	// "drexa/internal/auth/repository"
+	// authRepo "drexa/internal/auth/repository"
+	// authUc "drexa/internal/auth/usecase"
 	"drexa/internal/config"
 
 	"gorm.io/gorm"
@@ -25,27 +26,27 @@ type Server struct {
 func NewServer(cfg *config.Config, db *gorm.DB) *Server {
 	mux := http.NewServeMux()
 
-	// TODO : Buka comment jika usecase sudah selesai di implement
-
 	// Repositories
-	// userRepo := repository.NewUserRepository(db)
-	// authProviderRepo := repository.NewAuthProviderRepository(db)
-	// refreshTokenRepo := repository.NewRefreshTokenRepository(db)
-	// resetTokenRepo := repository.NewPasswordResetTokenRepository(db)
-	// kycRepo := repository.NewKycProfileRepository(db)
+	// userRepo := authRepo.NewUserRepository(db)
+	// authProviderRepo := authRepo.NewAuthProviderRepository(db)
+	// refreshTokenRepo := authRepo.NewRefreshTokenRepository(db)
+	// resetTokenRepo := authRepo.NewPasswordResetTokenRepository(db)
+	// kycRepo := authRepo.NewKycProfileRepository(db)
 
-	// // Services
+	// // // Services
 	// otpService := &auth.MockOTPService{}
 	// notificationService := &auth.MockNotificationService{}
-	// tokenService := auth.NewJWTTokenService(cfg.JWTSecret)
+	// tokenService := &auth.MockTokenService{}
 
 	// Usecases
-	// authUsecase := usecase.NewAuthUsecase(userRepo, authProviderRepo, refreshTokenRepo, resetTokenRepo, otpService, notificationService, tokenService)
-	// authProviderUsecase := usecase.NewAuthProviderUsecase(authProviderRepo, userRepo)
-	// kycUsecase := usecase.NewKycUsecase(kycRepo, notificationService)
-	// adminKycUsecase := usecase.NewAdminKycUsecase(kycRepo, notificationService)
-
-	var authHandlers auth.AuthHandlers
+	var authUsecase *auth.AuthUsecase
+	var authProviderUsecase *auth.AuthProviderUsecase
+	var kycUsecase *auth.KycUsecase
+	var adminKycUsecase *auth.AdminKycUsecase
+	// authUsecase := authUc.NewAuthUsecase(userRepo, authProviderRepo, refreshTokenRepo, resetTokenRepo, otpService, notificationService, tokenService)
+	// authProviderUsecase := authUc.NewAuthProviderUsecase(authProviderRepo, userRepo)
+	// kycUsecase := authUc.NewKycUsecase(kycRepo, notificationService)
+	// adminKycUsecase := authUc.NewAdminKycUsecase(kycRepo, notificationService)
 
 	// Group by feature
 	// authHandlers = auth.AuthHandlers{
@@ -57,7 +58,10 @@ func NewServer(cfg *config.Config, db *gorm.DB) *Server {
 
 	addRoutes(
 		mux,
-		authHandlers,
+		authUsecase,
+		authProviderUsecase,
+		kycUsecase,
+		adminKycUsecase,
 	)
 
 	var handler http.Handler = mux

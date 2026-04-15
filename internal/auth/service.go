@@ -105,3 +105,5 @@ func (m *MockNotificationService) SendPasswordReset(_ context.Context, userID, e
 	// log.Printf("Password reset link for %s: /reset-password?token=%s", email, rawToken)
 	return nil
 }
+
+type MockTokenService struct{}
