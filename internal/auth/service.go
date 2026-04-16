@@ -5,6 +5,17 @@ import (
 	"time"
 )
 
+// JWTClaims represents the payload embedded inside an access token
+type JWTClaims struct {
+	UserID          string    `json:"user_id"`
+	Email           string    `json:"email"`
+	IsEmailVerified bool      `json:"is_email_verified"`
+	IsPhoneVerified bool      `json:"is_phone_verified"`
+	IsKycVerified   bool      `json:"is_kyc_verified"` // lets middleware gate trading endpoints without a DB hit
+	ExpiresAt       time.Time `json:"exp"`
+	IssuedAt        time.Time `json:"iat"`
+}
+
 // OTPService abstracts OTP generation, storage, and delivery.
 // Implement this for any provider — Twilio, AWS SNS, Firebase, or a mock for tests.
 type OTPService interface {
@@ -52,58 +63,3 @@ type NotificationService interface {
 	// SendPasswordReset sends an email containing the raw reset token link
 	SendPasswordReset(ctx context.Context, userID, email, rawToken string) error
 }
-
-// JWTClaims represents the payload embedded inside an access token
-type JWTClaims struct {
-	UserID          string    `json:"user_id"`
-	Email           string    `json:"email"`
-	IsEmailVerified bool      `json:"is_email_verified"`
-	IsPhoneVerified bool      `json:"is_phone_verified"`
-	IsKycVerified   bool      `json:"is_kyc_verified"` // lets middleware gate trading endpoints without a DB hit
-	ExpiresAt       time.Time `json:"exp"`
-	IssuedAt        time.Time `json:"iat"`
-}
-
-// ─── Mock implementations ─────────────────────────────────────────────────────
-// Use these in tests or during development before real providers are chosen.
-
-type MockOTPService struct{}
-
-func (m *MockOTPService) GenerateAndSendEmail(_ context.Context, key, email string) error {
-	// In dev: log the OTP to stdout or always accept "123456"
-	return nil
-}
-
-func (m *MockOTPService) GenerateAndSendSMS(_ context.Context, key, phone string) error {
-	return nil
-}
-
-func (m *MockOTPService) Verify(_ context.Context, key, otp string) (bool, error) {
-	return otp == "123456", nil // hardcoded for dev/test
-}
-
-type MockNotificationService struct{}
-
-func (m *MockNotificationService) SendKycApproved(_ context.Context, userID, email string) error {
-	return nil
-}
-
-func (m *MockNotificationService) SendKycRejected(_ context.Context, userID, email, reason string) error {
-	return nil
-}
-
-func (m *MockNotificationService) SendPasswordChanged(_ context.Context, userID, email string) error {
-	return nil
-}
-
-func (m *MockNotificationService) SendNewLogin(_ context.Context, userID, email, userAgent, ipAddress string) error {
-	return nil
-}
-
-func (m *MockNotificationService) SendPasswordReset(_ context.Context, userID, email, rawToken string) error {
-	// In dev: log the reset URL to stdout
-	// log.Printf("Password reset link for %s: /reset-password?token=%s", email, rawToken)
-	return nil
-}
-
-type MockTokenService struct{}

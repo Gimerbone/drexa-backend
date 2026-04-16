@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"drexa/internal/auth"
-	// authRepo "drexa/internal/auth/repository"
-	// authUc "drexa/internal/auth/usecase"
+	authRepo "drexa/internal/auth/repository"
+	authSvc "drexa/internal/auth/service"
+	authUc "drexa/internal/auth/usecase"
 	"drexa/internal/config"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -23,27 +25,31 @@ type Server struct {
 	httpServer *http.Server
 }
 
+var (
+	mockSecretKey = uuid.NewString()
+)
+
 func NewServer(cfg *config.Config, db *gorm.DB) *Server {
 	mux := http.NewServeMux()
 
 	// Repositories
-	// userRepo := authRepo.NewUserRepository(db)
-	// authProviderRepo := authRepo.NewAuthProviderRepository(db)
-	// refreshTokenRepo := authRepo.NewRefreshTokenRepository(db)
-	// resetTokenRepo := authRepo.NewPasswordResetTokenRepository(db)
+	userRepo := authRepo.NewUserRepository(db)
+	authProviderRepo := authRepo.NewAuthProviderRepository(db)
+	refreshTokenRepo := authRepo.NewRefreshTokenRepository(db)
+	resetTokenRepo := authRepo.NewPasswordResetTokenRepository(db)
 	// kycRepo := authRepo.NewKycProfileRepository(db)
 
 	// // // Services
-	// otpService := &auth.MockOTPService{}
-	// notificationService := &auth.MockNotificationService{}
-	// tokenService := &auth.MockTokenService{}
+	otpService := authSvc.NewMockOTPService()
+	notificationService := authSvc.NewMockNotificationService()
+	tokenService := authSvc.NewTokenService([]byte(mockSecretKey), "drexa.api", time.Minute*15, time.Hour*24*7)
 
 	// Usecases
-	var authUsecase *auth.AuthUsecase
-	var authProviderUsecase *auth.AuthProviderUsecase
-	var kycUsecase *auth.KycUsecase
-	var adminKycUsecase *auth.AdminKycUsecase
-	// authUsecase := authUc.NewAuthUsecase(userRepo, authProviderRepo, refreshTokenRepo, resetTokenRepo, otpService, notificationService, tokenService)
+	var authProviderUsecase auth.AuthProviderUsecase
+	var kycUsecase auth.KycUsecase
+	var adminKycUsecase auth.AdminKycUsecase
+
+	authUsecase := authUc.NewAuthUsecase(userRepo, authProviderRepo, refreshTokenRepo, resetTokenRepo, otpService, notificationService, tokenService)
 	// authProviderUsecase := authUc.NewAuthProviderUsecase(authProviderRepo, userRepo)
 	// kycUsecase := authUc.NewKycUsecase(kycRepo, notificationService)
 	// adminKycUsecase := authUc.NewAdminKycUsecase(kycRepo, notificationService)

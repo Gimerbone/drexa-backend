@@ -21,25 +21,25 @@ type authUsecase struct {
 	tokenService     auth.TokenService
 }
 
-// func NewAuthUsecase(
-// 	userRepo auth.UserRepository,
-// 	authProviderRepo auth.AuthProviderRepository,
-// 	refreshTokenRepo auth.RefreshTokenRepository,
-// 	resetTokenRepo auth.PasswordResetTokenRepository,
-// 	otpService auth.OTPService,
-// 	notifService auth.NotificationService,
-// 	tokenService auth.TokenService,
-// ) auth.AuthUsecase {
-// 	return &authUsecase{
-// 		userRepo:         userRepo,
-// 		authProviderRepo: authProviderRepo,
-// 		refreshTokenRepo: refreshTokenRepo,
-// 		resetTokenRepo:   resetTokenRepo,
-// 		otpService:       otpService,
-// 		notifService:     notifService,
-// 		tokenService:     tokenService,
-// 	}
-// }
+func NewAuthUsecase(
+	userRepo auth.UserRepository,
+	authProviderRepo auth.AuthProviderRepository,
+	refreshTokenRepo auth.RefreshTokenRepository,
+	resetTokenRepo auth.PasswordResetTokenRepository,
+	otpService auth.OTPService,
+	notifService auth.NotificationService,
+	tokenService auth.TokenService,
+) auth.AuthUsecase {
+	return &authUsecase{
+		userRepo:         userRepo,
+		authProviderRepo: authProviderRepo,
+		refreshTokenRepo: refreshTokenRepo,
+		resetTokenRepo:   resetTokenRepo,
+		otpService:       otpService,
+		notifService:     notifService,
+		tokenService:     tokenService,
+	}
+}
 
 // TODO : Implement all usecases
 // register
@@ -355,5 +355,5 @@ func (uc *authUsecase) ResetPassword(ctx context.Context, rawToken, newPassword 
 }
 
 // PIN
-func SetTradingPin(ctx context.Context, userID, pin string) error
-func VerifyTradingPin(ctx context.Context, userID, pin string) (bool, error)
+func (uc *authUsecase) SetTradingPin(ctx context.Context, userID, pin string) error
+func (uc *authUsecase) VerifyTradingPin(ctx context.Context, userID, pin string) (bool, error)
