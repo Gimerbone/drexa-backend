@@ -29,17 +29,20 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Reverse proxy — only started when "ngrok" is in COMPOSE_PROFILES (see .env).
-  # Leave COMPOSE_PROFILES empty to run on localhost without the public tunnel.
-  ngrok:
-    image: ngrok/ngrok:latest
-    profiles: ["ngrok"]
+  nginx:
+    image: nginx:alpine
     restart: unless-stopped
-    command: http server:8080 --domain=penalize-identify-sneezing.ngrok-free.dev --pooling-enabled
-    environment:
-      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - server
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token eyJhIjoiM2RiMWFmZjlhYWIxYjZlMDA3MmM4MTRjMDNjMGY3MzgiLCJ0IjoiNzZhYWY3MjEtMWEzMy00N2I0LWIwYWYtMjlhNjg4MDYwY2VhIiwicyI6Ik5UUXpaRGs1WWpNdFlXUXdaUzAwTkdSaExUaGtNMll0WVRjMFl6ZGhOVFkxWW1GaiJ9
+    depends_on:
+      - nginx
 
 volumes:
   postgres_data:

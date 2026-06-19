@@ -337,8 +337,8 @@ func (a *p2pWalletAdapter) CreditBalance(ctx context.Context, userID, currency s
 					UserID:    userID,
 					Currency:  wallet.CurrencyCode(currency),
 					Status:    wallet.WalletStatusActive,
-					CreatedAt: time.Now(),
-					UpdatedAt: time.Now(),
+					CreatedAt:  time.Now(),
+					ModifiedAt: time.Now(),
 				}
 				if err := a.walletRepo.Create(ctx, w); err != nil {
 					return err
