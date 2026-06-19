@@ -172,7 +172,7 @@ func (a *orderWalletAdapter) SettleTrade(ctx context.Context, tradeID string,
 			}
 			// Record spend tx
 			if err := a.txRepo.Create(ctx, &wallet.Transaction{
-				TxID:          tradeID + "-" + uID + "-spend",
+				TxID:          uuid.NewString(),
 				WalletID:      wSpendLock.WalletID,
 				UserID:        uID,
 				Type:          wallet.TxTypeTrade,
@@ -214,7 +214,7 @@ func (a *orderWalletAdapter) SettleTrade(ctx context.Context, tradeID string,
 			}
 			// Record receive tx
 			if err := a.txRepo.Create(ctx, &wallet.Transaction{
-				TxID:          tradeID + "-" + uID + "-recv",
+				TxID:          uuid.NewString(),
 				WalletID:      wRecLock.WalletID,
 				UserID:        uID,
 				Type:          wallet.TxTypeTrade,
