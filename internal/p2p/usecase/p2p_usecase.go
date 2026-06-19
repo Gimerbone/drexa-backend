@@ -13,26 +13,24 @@ import (
 	"github.com/google/uuid"
 
 	"drexa/internal/p2p"
-	"drexa/internal/p2p/chain"
 )
 
 // service implements both p2p.Usecase and p2p.AdminUsecase.
 type service struct {
 	repo           p2p.Repository
-	escrow         chain.EscrowClient
 	confirmTimeout time.Duration
 	walletSvc      p2p.WalletService
 }
 
 // New returns the user-facing P2P usecase.
-func New(repo p2p.Repository, escrow chain.EscrowClient, confirmTimeout time.Duration, walletSvc p2p.WalletService) p2p.Usecase {
-	return &service{repo: repo, escrow: escrow, confirmTimeout: confirmTimeout, walletSvc: walletSvc}
+func New(repo p2p.Repository, confirmTimeout time.Duration, walletSvc p2p.WalletService) p2p.Usecase {
+	return &service{repo: repo, confirmTimeout: confirmTimeout, walletSvc: walletSvc}
 }
 
 // NewAdmin returns the admin-facing P2P usecase (dispute resolution). It shares
 // the same backing implementation as New.
-func NewAdmin(repo p2p.Repository, escrow chain.EscrowClient, confirmTimeout time.Duration, walletSvc p2p.WalletService) p2p.AdminUsecase {
-	return &service{repo: repo, escrow: escrow, confirmTimeout: confirmTimeout, walletSvc: walletSvc}
+func NewAdmin(repo p2p.Repository, confirmTimeout time.Duration, walletSvc p2p.WalletService) p2p.AdminUsecase {
+	return &service{repo: repo, confirmTimeout: confirmTimeout, walletSvc: walletSvc}
 }
 
 // chainCtx derives a context bounded by the configured tx-confirmation timeout.
@@ -48,46 +46,78 @@ func ptr(s string) *string { return &s }
 // ─── Advertisements ──────────────────────────────────────────────────────────
 
 func (s *service) CreateAd(ctx context.Context, sellerID string, in p2p.CreateAdInput) (*p2p.P2PAdvertisement, error) {
-	in.PairID = strings.TrimSpace(in.PairID)
+	in.PairID = strings.ReplaceAll(strings.TrimSpace(in.PairID), "-", "_")
 	in.PaymentMethod = strings.TrimSpace(in.PaymentMethod)
 	if in.PairID == "" || in.PaymentMethod == "" {
 		return nil, p2p.ErrInvalidInput
 	}
-	if in.Price <= 0 || in.MinAmount <= 0 || in.MaxAmount < in.MinAmount {
+	if in.Price <= 0 || in.Amount <= 0 {
 		return nil, p2p.ErrInvalidInput
 	}
 	if in.PaymentWindow <= 0 {
 		return nil, p2p.ErrInvalidInput
 	}
+	if in.Type != p2p.AdTypeBuy && in.Type != p2p.AdTypeSell {
+		in.Type = p2p.AdTypeSell
+	}
+
+	parts := strings.Split(in.PairID, "_")
+	if len(parts) != 2 {
+		return nil, p2p.ErrInvalidInput
+	}
+	baseCurrency := parts[0]
+	quoteCurrency := parts[1]
+
+	adID := uuid.NewString()
+
+	if in.Type == p2p.AdTypeBuy {
+		// Debit quote (USDT)
+		totalQuote := in.Amount * in.Price
+		if err := s.walletSvc.DebitBalance(ctx, sellerID, quoteCurrency, totalQuote, adID, "P2P Buy Ad Locked"); err != nil {
+			return nil, p2p.ErrInsufficientFunds
+		}
+	} else {
+		// Debit base (Crypto)
+		if err := s.walletSvc.DebitBalance(ctx, sellerID, baseCurrency, in.Amount, adID, "P2P Sell Ad Locked"); err != nil {
+			return nil, p2p.ErrInsufficientFunds
+		}
+	}
 	
 	sellerAddress, err := s.walletSvc.GetDepositAddress(ctx, sellerID, "ETH")
 	if err != nil {
-		return nil, err
+		sellerAddress = ""
 	}
 
 	ad := &p2p.P2PAdvertisement{
-		AdvertisementID: uuid.NewString(),
+		AdvertisementID: adID,
 		SellerID:        sellerID,
+		Type:            in.Type,
 		PairID:          in.PairID,
 		Price:           in.Price,
-		MinAmount:       in.MinAmount,
-		MaxAmount:       in.MaxAmount,
+		TotalAmount:     in.Amount,
+		RemainingAmount: in.Amount,
 		PaymentMethod:   in.PaymentMethod,
 		PaymentWindow:   in.PaymentWindow,
 		SellerAddress:   sellerAddress,
 		Status:          p2p.AdStatusActive,
 	}
 	if err := s.repo.CreateAd(ctx, ad); err != nil {
+		// If DB fails, refund the user
+		if in.Type == p2p.AdTypeBuy {
+			_ = s.walletSvc.CreditBalance(ctx, sellerID, quoteCurrency, in.Amount*in.Price, adID, "P2P Refund Failed Ad")
+		} else {
+			_ = s.walletSvc.CreditBalance(ctx, sellerID, baseCurrency, in.Amount, adID, "P2P Refund Failed Ad")
+		}
 		return nil, err
 	}
 	return ad, nil
 }
 
 func (s *service) ListAds(ctx context.Context, f p2p.AdFilter) ([]p2p.P2PAdvertisement, error) {
-	// Public listings default to active ads only.
 	if f.Status == "" {
 		f.Status = p2p.AdStatusActive
 	}
+	f.PairID = strings.ReplaceAll(f.PairID, "-", "_")
 	return s.repo.ListAds(ctx, f)
 }
 
@@ -101,7 +131,7 @@ func (s *service) MyAds(ctx context.Context, sellerID string) ([]p2p.P2PAdvertis
 
 func (s *service) SetAdStatus(ctx context.Context, sellerID, adID string, status p2p.AdvertisementStatus) error {
 	switch status {
-	case p2p.AdStatusActive, p2p.AdStatusPaused, p2p.AdStatusCompleted:
+	case p2p.AdStatusActive, p2p.AdStatusPaused, p2p.AdStatusCompleted, p2p.AdStatusCancelled:
 	default:
 		return p2p.ErrInvalidInput
 	}
@@ -112,19 +142,38 @@ func (s *service) SetAdStatus(ctx context.Context, sellerID, adID string, status
 	if ad.SellerID != sellerID {
 		return p2p.ErrForbidden
 	}
+
+	if status == p2p.AdStatusCancelled && ad.Status != p2p.AdStatusCancelled && ad.Status != p2p.AdStatusCompleted {
+		if ad.RemainingAmount > 0 {
+			parts := strings.Split(ad.PairID, "_")
+			baseCurrency := parts[0]
+			quoteCurrency := parts[1]
+
+			if ad.Type == p2p.AdTypeBuy {
+				totalQuote := ad.RemainingAmount * ad.Price
+				_ = s.walletSvc.CreditBalance(ctx, sellerID, quoteCurrency, totalQuote, adID, "P2P Buy Ad Cancelled Refund")
+			} else {
+				_ = s.walletSvc.CreditBalance(ctx, sellerID, baseCurrency, ad.RemainingAmount, adID, "P2P Sell Ad Cancelled Refund")
+			}
+		}
+		ad.RemainingAmount = 0
+		ad.Status = p2p.AdStatusCancelled
+		return s.repo.UpdateAd(ctx, ad)
+	}
+
 	return s.repo.UpdateAdStatus(ctx, adID, status)
 }
 
 // ─── Orders ──────────────────────────────────────────────────────────────────
 
-func (s *service) CreateOrder(ctx context.Context, buyerID string, in p2p.CreateOrderInput) (*p2p.P2POrder, error) {
+func (s *service) CreateOrder(ctx context.Context, takerID string, in p2p.CreateOrderInput) (*p2p.P2POrder, error) {
 	if in.AdvertisementID == "" || in.Amount <= 0 {
 		return nil, p2p.ErrInvalidInput
 	}
 	
-	buyerAddress, err := s.walletSvc.GetDepositAddress(ctx, buyerID, "ETH")
+	buyerAddress, err := s.walletSvc.GetDepositAddress(ctx, takerID, "ETH")
 	if err != nil {
-		return nil, err
+		buyerAddress = ""
 	}
 
 	ad, err := s.repo.GetAd(ctx, in.AdvertisementID)
@@ -134,24 +183,71 @@ func (s *service) CreateOrder(ctx context.Context, buyerID string, in p2p.Create
 	if ad.Status != p2p.AdStatusActive {
 		return nil, p2p.ErrAdNotActive
 	}
-	if ad.SellerID == buyerID {
+	if ad.SellerID == takerID {
 		return nil, p2p.ErrSelfTrade
 	}
-	if in.Amount < ad.MinAmount || in.Amount > ad.MaxAmount {
+	if in.Amount > ad.RemainingAmount {
 		return nil, p2p.ErrAmountOutOfRange
 	}
-	if !chain.IsAddress(ad.SellerAddress) {
-		// Misconfigured ad — seller never set a payout address.
-		return nil, p2p.ErrInvalidAddress
-	}
 
-	parts := strings.Split(ad.PairID, "-")
+	parts := strings.Split(ad.PairID, "_")
 	baseCurrency := parts[0]
+	quoteCurrency := parts[1]
 
 	orderID := uuid.NewString()
+	totalQuote := in.Amount * ad.Price
 
-	// Deduct the crypto from the seller's internal asset ledger
-	if err := s.walletSvc.DebitBalance(ctx, ad.SellerID, baseCurrency, in.Amount, orderID, "P2P Escrow Funding"); err != nil {
+	makerID := ad.SellerID
+	var buyerID, sellerID string
+
+	if ad.Type == p2p.AdTypeBuy {
+		// Maker is buying Crypto (locked USDT). Taker is selling Crypto (gets USDT).
+		buyerID = makerID
+		sellerID = takerID
+
+		// 1. Debit crypto from Taker (Seller)
+		if err := s.walletSvc.DebitBalance(ctx, takerID, baseCurrency, in.Amount, orderID, "P2P Order (Sell)"); err != nil {
+			return nil, p2p.ErrInsufficientFunds
+		}
+
+		// 2. Credit quote (USDT) to Taker (Seller). It comes from Maker's locked USDT (no extra deduction needed from Maker's wallet)
+		if err := s.walletSvc.CreditBalance(ctx, takerID, quoteCurrency, totalQuote, orderID, "P2P Order Proceed"); err != nil {
+			return nil, err
+		}
+
+		// 3. Credit crypto to Maker (Buyer)
+		if err := s.walletSvc.CreditBalance(ctx, makerID, baseCurrency, in.Amount, orderID, "P2P Ad Filled Proceed"); err != nil {
+			return nil, err
+		}
+
+	} else {
+		// Maker is selling Crypto (locked Crypto). Taker is buying Crypto (gets Crypto).
+		buyerID = takerID
+		sellerID = makerID
+
+		// 1. Debit quote (USDT) from Taker (Buyer)
+		if err := s.walletSvc.DebitBalance(ctx, takerID, quoteCurrency, totalQuote, orderID, "P2P Order (Buy)"); err != nil {
+			return nil, p2p.ErrInsufficientFunds
+		}
+
+		// 2. Credit crypto to Taker (Buyer). It comes from Maker's locked Crypto
+		if err := s.walletSvc.CreditBalance(ctx, takerID, baseCurrency, in.Amount, orderID, "P2P Order Proceed"); err != nil {
+			return nil, err
+		}
+
+		// 3. Credit quote (USDT) to Maker (Seller)
+		if err := s.walletSvc.CreditBalance(ctx, makerID, quoteCurrency, totalQuote, orderID, "P2P Ad Filled Proceed"); err != nil {
+			return nil, err
+		}
+	}
+
+	// Update ad
+	ad.RemainingAmount -= in.Amount
+	if ad.RemainingAmount <= 0.00000001 {
+		ad.RemainingAmount = 0
+		ad.Status = p2p.AdStatusCompleted
+	}
+	if err := s.repo.UpdateAd(ctx, ad); err != nil {
 		return nil, err
 	}
 
@@ -160,136 +256,35 @@ func (s *service) CreateOrder(ctx context.Context, buyerID string, in p2p.Create
 		P2POrderID:      orderID,
 		AdvertisementID: ad.AdvertisementID,
 		BuyerID:         buyerID,
-		SellerID:        ad.SellerID,
+		SellerID:        sellerID,
 		Amount:          in.Amount,
-		TotalUSD:        in.Amount * ad.Price,
-		Status:          p2p.P2POrderCreated,
+		TotalUSD:        totalQuote,
+		Status:          p2p.P2POrderReleased,
 		BuyerAddress:    buyerAddress,
 		SellerAddress:   ad.SellerAddress,
-		OnChainID:       s.escrow.OrderHash(orderID),
-		EscrowState:     chain.StateNone.String(),
-		ExpiredAt:       now.Add(time.Duration(ad.PaymentWindow) * time.Minute),
+		OnChainID:       "internal_swap",
+		EscrowState:     "completed",
+		ExpiredAt:       now,
+		PaidAt:          &now,
+		ReleasedAt:      &now,
 	}
 	if err := s.repo.CreateOrder(ctx, order); err != nil {
 		return nil, err
 	}
 
-	// Fund the on-chain escrow with the seller's crypto (platform-operated).
-	cctx, cancel := s.chainCtx(ctx)
-	defer cancel()
-	txHash, err := s.escrow.CreateEscrow(cctx, orderID, order.BuyerAddress, order.SellerAddress, chain.EthToWei(in.Amount))
-	if err != nil {
-		// Refund the seller's internal balance because the escrow creation failed.
-		_ = s.walletSvc.CreditBalance(ctx, ad.SellerID, baseCurrency, in.Amount, orderID, "Refund: P2P Escrow Funding Failed")
-
-		// Roll the order back to cancelled so it can't be acted on.
-		order.Status = p2p.P2POrderCancelled
-		_ = s.repo.UpdateOrder(ctx, order)
-		return nil, err
-	}
-
-	order.CreateTxHash = &txHash
-	order.EscrowState = chain.StateFunded.String()
-	if err := s.repo.UpdateOrder(ctx, order); err != nil {
-		return nil, err
-	}
 	return order, nil
 }
 
 func (s *service) MarkPaid(ctx context.Context, userID, orderID string, proofURL *string) (*p2p.P2POrder, error) {
-	order, err := s.repo.GetOrder(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if order.BuyerID != userID {
-		return nil, p2p.ErrForbidden
-	}
-	if order.Status != p2p.P2POrderCreated {
-		return nil, p2p.ErrInvalidState
-	}
-	if time.Now().UTC().After(order.ExpiredAt) {
-		return nil, p2p.ErrP2POrderExpired
-	}
-
-	// Record the fiat-paid flag on-chain (informational).
-	cctx, cancel := s.chainCtx(ctx)
-	defer cancel()
-	txHash, err := s.escrow.MarkPaid(cctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	_ = txHash // state transition is captured below; tx hash is incidental here
-
-	now := time.Now().UTC()
-	order.Status = p2p.P2POrderPaid
-	order.EscrowState = chain.StatePaid.String()
-	order.PaidAt = &now
-	if proofURL != nil && strings.TrimSpace(*proofURL) != "" {
-		order.PaymentProofURL = proofURL
-	}
-	if err := s.repo.UpdateOrder(ctx, order); err != nil {
-		return nil, err
-	}
-	return order, nil
+	return nil, errors.New("not applicable for atomic internal swaps")
 }
 
 func (s *service) ReleaseOrder(ctx context.Context, userID, orderID string) (*p2p.P2POrder, error) {
-	order, err := s.repo.GetOrder(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if order.SellerID != userID {
-		return nil, p2p.ErrForbidden
-	}
-	if order.Status != p2p.P2POrderCreated && order.Status != p2p.P2POrderPaid {
-		return nil, p2p.ErrInvalidState
-	}
-
-	cctx, cancel := s.chainCtx(ctx)
-	defer cancel()
-	txHash, err := s.escrow.Release(cctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-
-	now := time.Now().UTC()
-	order.Status = p2p.P2POrderReleased
-	order.EscrowState = chain.StateReleased.String()
-	order.ReleasedAt = &now
-	order.ReleaseTxHash = &txHash
-	if err := s.repo.UpdateOrder(ctx, order); err != nil {
-		return nil, err
-	}
-	return order, nil
+	return nil, errors.New("not applicable for atomic internal swaps")
 }
 
 func (s *service) CancelOrder(ctx context.Context, userID, orderID string) (*p2p.P2POrder, error) {
-	order, err := s.repo.GetOrder(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if order.BuyerID != userID && order.SellerID != userID {
-		return nil, p2p.ErrForbidden
-	}
-	// Only cancellable before the buyer has marked payment — refunds the seller.
-	if order.Status != p2p.P2POrderCreated {
-		return nil, p2p.ErrInvalidState
-	}
-
-	cctx, cancel := s.chainCtx(ctx)
-	defer cancel()
-	txHash, err := s.escrow.Refund(cctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-
-	order.Status = p2p.P2POrderCancelled
-	order.EscrowState = chain.StateRefunded.String()
-	order.RefundTxHash = &txHash
-	if err := s.repo.UpdateOrder(ctx, order); err != nil {
-		return nil, err
-	}
-	return order, nil
+	return nil, errors.New("not applicable for atomic internal swaps")
 }
 
 func (s *service) GetOrder(ctx context.Context, userID, orderID string) (*p2p.P2POrder, error) {
@@ -308,86 +303,19 @@ func (s *service) MyOrders(ctx context.Context, userID string) ([]p2p.P2POrder, 
 }
 
 func (s *service) EscrowInfo(ctx context.Context, userID, orderID string) (p2p.OnChainEscrow, error) {
-	order, err := s.repo.GetOrder(ctx, orderID)
-	if err != nil {
-		return p2p.OnChainEscrow{}, err
-	}
-	if order.BuyerID != userID && order.SellerID != userID {
-		return p2p.OnChainEscrow{}, p2p.ErrForbidden
-	}
-
-	cctx, cancel := s.chainCtx(ctx)
-	defer cancel()
-	info, err := s.escrow.GetEscrow(cctx, orderID)
-	if err != nil {
-		return p2p.OnChainEscrow{}, err
-	}
-	amount := "0"
-	if info.Amount != nil {
-		amount = info.Amount.String()
-	}
 	return p2p.OnChainEscrow{
-		Buyer:     info.Buyer,
-		Seller:    info.Seller,
-		AmountWei: amount,
-		State:     info.State.String(),
-		CreatedAt: info.CreatedAt,
+		Buyer:     "Internal Wallet",
+		Seller:    "Internal Wallet",
+		AmountWei: "0",
+		State:     "completed",
+		CreatedAt: uint64(time.Now().Unix()),
 	}, nil
 }
 
 // ─── Disputes ────────────────────────────────────────────────────────────────
 
 func (s *service) OpenDispute(ctx context.Context, userID, orderID string, in p2p.OpenDisputeInput) (*p2p.P2PDispute, error) {
-	in.Reason = strings.TrimSpace(in.Reason)
-	if in.Reason == "" {
-		return nil, p2p.ErrInvalidInput
-	}
-
-	order, err := s.repo.GetOrder(ctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-	if order.BuyerID != userID && order.SellerID != userID {
-		return nil, p2p.ErrForbidden
-	}
-	if order.Status != p2p.P2POrderCreated && order.Status != p2p.P2POrderPaid {
-		return nil, p2p.ErrInvalidState
-	}
-
-	// Reject if a dispute is already open for this order.
-	if existing, err := s.repo.GetDisputeByOrder(ctx, orderID); err == nil && existing.Status == p2p.DisputeOpen {
-		return nil, p2p.ErrDisputeExists
-	} else if err != nil && !errors.Is(err, p2p.ErrDisputeNotFound) {
-		return nil, err
-	}
-
-	// Freeze the escrow on-chain pending arbiter resolution.
-	cctx, cancel := s.chainCtx(ctx)
-	defer cancel()
-	txHash, err := s.escrow.RaiseDispute(cctx, orderID)
-	if err != nil {
-		return nil, err
-	}
-
-	order.Status = p2p.P2POrderDisputed
-	order.EscrowState = chain.StateDisputed.String()
-	order.DisputeTxHash = &txHash
-	if err := s.repo.UpdateOrder(ctx, order); err != nil {
-		return nil, err
-	}
-
-	dispute := &p2p.P2PDispute{
-		P2PDisputeID: uuid.NewString(),
-		P2POrderID:   orderID,
-		RaisedBy:     userID,
-		Reason:       in.Reason,
-		EvidenceURL:  in.EvidenceURL,
-		Status:       p2p.DisputeOpen,
-	}
-	if err := s.repo.CreateDispute(ctx, dispute); err != nil {
-		return nil, err
-	}
-	return dispute, nil
+	return nil, errors.New("not applicable for atomic internal swaps")
 }
 
 // ─── Admin ───────────────────────────────────────────────────────────────────
@@ -397,47 +325,5 @@ func (s *service) ListOpenDisputes(ctx context.Context) ([]p2p.P2PDispute, error
 }
 
 func (s *service) ResolveDispute(ctx context.Context, adminID, disputeID string, releaseToBuyer bool, resolution string) (*p2p.P2PDispute, error) {
-	dispute, err := s.repo.GetDispute(ctx, disputeID)
-	if err != nil {
-		return nil, err
-	}
-	if dispute.Status != p2p.DisputeOpen {
-		return nil, p2p.ErrInvalidState
-	}
-	order, err := s.repo.GetOrder(ctx, dispute.P2POrderID)
-	if err != nil {
-		return nil, err
-	}
-
-	// Arbiter resolves on-chain: funds go to the buyer (release) or seller (refund).
-	cctx, cancel := s.chainCtx(ctx)
-	defer cancel()
-	txHash, err := s.escrow.ResolveDispute(cctx, order.P2POrderID, releaseToBuyer)
-	if err != nil {
-		return nil, err
-	}
-
-	now := time.Now().UTC()
-	if releaseToBuyer {
-		order.Status = p2p.P2POrderReleased
-		order.EscrowState = chain.StateReleased.String()
-		order.ReleasedAt = &now
-		order.ReleaseTxHash = &txHash
-	} else {
-		order.Status = p2p.P2POrderCancelled
-		order.EscrowState = chain.StateRefunded.String()
-		order.RefundTxHash = &txHash
-	}
-	if err := s.repo.UpdateOrder(ctx, order); err != nil {
-		return nil, err
-	}
-
-	dispute.Status = p2p.DisputeResolved
-	dispute.ResolvedBy = ptr(adminID)
-	dispute.Resolution = resolution
-	dispute.ResolvedAt = &now
-	if err := s.repo.UpdateDispute(ctx, dispute); err != nil {
-		return nil, err
-	}
-	return dispute, nil
+	return nil, errors.New("not applicable for atomic internal swaps")
 }

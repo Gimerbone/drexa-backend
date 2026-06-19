@@ -74,6 +74,13 @@ func (r *p2pRepository) ListAdsBySeller(ctx context.Context, sellerID string) ([
 	return ads, nil
 }
 
+func (r *p2pRepository) UpdateAd(ctx context.Context, ad *p2p.P2PAdvertisement) error {
+	if err := r.db.WithContext(ctx).Save(ad).Error; err != nil {
+		return fmt.Errorf("p2p_repo: update ad: %w", err)
+	}
+	return nil
+}
+
 func (r *p2pRepository) UpdateAdStatus(ctx context.Context, id string, status p2p.AdvertisementStatus) error {
 	res := r.db.WithContext(ctx).Model(&p2p.P2PAdvertisement{}).
 		Where("advertisement_id = ?", id).

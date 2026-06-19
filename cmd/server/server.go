@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -28,7 +27,6 @@ import (
 	"drexa/internal/order"
 	orderRepo "drexa/internal/order/repository"
 	"drexa/internal/p2p"
-	p2pChain "drexa/internal/p2p/chain"
 	p2pRepo "drexa/internal/p2p/repository"
 	p2pUc "drexa/internal/p2p/usecase"
 	"drexa/internal/platform/middleware"
@@ -270,7 +268,7 @@ func (a *p2pWalletAdapter) GetDepositAddress(ctx context.Context, userID, curren
 	cryptoAddr, err := a.cryptoRepo.FindByUserAndCurrency(ctx, userID, wallet.CurrencyCode(currency))
 	if err != nil {
 		if err == wallet.ErrCryptoAddressNotFound {
-			return "", errors.New("crypto address not generated for user")
+			return "", p2p.ErrCryptoAddressNotFound
 		}
 		return "", err
 	}
@@ -281,6 +279,9 @@ func (a *p2pWalletAdapter) DebitBalance(ctx context.Context, userID, currency st
 	return a.tx.Do(ctx, func(ctx context.Context) error {
 		w, err := a.walletRepo.FindByUserAndCurrency(ctx, userID, wallet.CurrencyCode(currency))
 		if err != nil {
+			if err == wallet.ErrWalletNotFound {
+				return p2p.ErrInsufficientFunds
+			}
 			return err
 		}
 		wLock, err := a.walletRepo.FindByIDForUpdate(ctx, w.WalletID)
@@ -298,7 +299,7 @@ func (a *p2pWalletAdapter) DebitBalance(ctx context.Context, userID, currency st
 		}
 
 		if wLock.Balance < amt {
-			return wallet.ErrInsufficientBalance
+			return p2p.ErrInsufficientFunds
 		}
 
 		newBal := wLock.Balance - amt
@@ -541,23 +542,7 @@ func NewServer(cfg *config.Config, db *gorm.DB) *Server {
 
 	// ── P2P marketplace (on-chain smart-contract escrow) ───────────────────────
 	p2pRepository := p2pRepo.New(db)
-	var escrowClient p2pChain.EscrowClient
-	escrowClient, escrowErr := p2pChain.New(context.Background(), p2pChain.Config{
-		RPCURL:          cfg.Escrow.RPCURL,
-		ChainID:         cfg.Escrow.ChainID,
-		ContractAddress: cfg.Escrow.ContractAddress,
-		PrivateKey:      cfg.Escrow.PrivateKey,
-	})
-	if escrowErr != nil {
-		if errors.Is(escrowErr, p2pChain.ErrNotConfigured) {
-			log.Warn().Msg("p2p escrow chain client not configured; P2P escrow endpoints will return 503")
-		} else {
-			log.Error().Err(escrowErr).Msg("p2p escrow chain client init failed; falling back to disabled")
-		}
-		escrowClient = p2pChain.NewDisabled()
-	} else {
-		log.Info().Msg("p2p escrow chain client connected")
-	}
+	// (Escrow Client removed for Internal Atomic P2P Swap)
 	p2pWalletAdapter := &p2pWalletAdapter{
 		cryptoRepo: cryptoAddressRepo,
 		walletRepo: walletRepository,
@@ -565,8 +550,8 @@ func NewServer(cfg *config.Config, db *gorm.DB) *Server {
 		tx:         txManager,
 	}
 
-	p2pUsecase := p2pUc.New(p2pRepository, escrowClient, cfg.Escrow.ConfirmTimeout, p2pWalletAdapter)
-	p2pAdminUsecase := p2pUc.NewAdmin(p2pRepository, escrowClient, cfg.Escrow.ConfirmTimeout, p2pWalletAdapter)
+	p2pUsecase := p2pUc.New(p2pRepository, cfg.Escrow.ConfirmTimeout, p2pWalletAdapter)
+	p2pAdminUsecase := p2pUc.NewAdmin(p2pRepository, cfg.Escrow.ConfirmTimeout, p2pWalletAdapter)
 	p2pHandler := p2p.NewHandler(p2pUsecase, p2pAdminUsecase, getUserID)
 
 	// ── HTTP ──────────────────────────────────────────────────────────────────

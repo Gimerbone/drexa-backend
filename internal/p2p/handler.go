@@ -46,7 +46,9 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, ErrInvalidInput),
 		errors.Is(err, ErrInvalidAddress),
 		errors.Is(err, ErrAmountOutOfRange),
-		errors.Is(err, ErrSelfTrade):
+		errors.Is(err, ErrSelfTrade),
+		errors.Is(err, ErrInsufficientFunds),
+		errors.Is(err, ErrCryptoAddressNotFound):
 		sendJSON(w, http.StatusBadRequest, messageResponse{Error: err.Error()})
 	case errors.Is(err, ErrAdNotActive),
 		errors.Is(err, ErrInvalidState),
@@ -58,7 +60,7 @@ func writeErr(w http.ResponseWriter, r *http.Request, err error) {
 			Error: "on-chain escrow is not configured on this server",
 		})
 	default:
-		log.Ctx(r.Context()).Error().Err(err).Msg("p2p: request failed")
+		log.Error().Err(err).Msg("p2p: request failed")
 		sendJSON(w, http.StatusInternalServerError, messageResponse{Error: "internal server error"})
 	}
 }
@@ -83,12 +85,12 @@ func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 // ─── Advertisement handlers ──────────────────────────────────────────────────
 
 type createAdRequest struct {
-	PairID        string  `json:"pair_id"`
-	Price         float64 `json:"price"`
-	MinAmount     float64 `json:"min_amount"`
-	MaxAmount     float64 `json:"max_amount"`
-	PaymentMethod string  `json:"payment_method"`
-	PaymentWindow int     `json:"payment_window"`
+	Type          AdvertisementType `json:"type"`
+	PairID        string                `json:"pair_id"`
+	Price         float64               `json:"price"`
+	Amount        float64               `json:"amount"`
+	PaymentMethod string                `json:"payment_method"`
+	PaymentWindow int                   `json:"payment_window"`
 }
 
 // POST /api/v1/p2p/ads
@@ -102,10 +104,10 @@ func (h *Handler) CreateAd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ad, err := h.uc.CreateAd(r.Context(), uid, CreateAdInput{
+		Type:          req.Type,
 		PairID:        req.PairID,
 		Price:         req.Price,
-		MinAmount:     req.MinAmount,
-		MaxAmount:     req.MaxAmount,
+		Amount:        req.Amount,
 		PaymentMethod: req.PaymentMethod,
 		PaymentWindow: req.PaymentWindow,
 	})

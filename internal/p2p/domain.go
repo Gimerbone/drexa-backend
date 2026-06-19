@@ -14,6 +14,14 @@ const (
 	AdStatusActive    AdvertisementStatus = "active"
 	AdStatusPaused    AdvertisementStatus = "paused"
 	AdStatusCompleted AdvertisementStatus = "completed"
+	AdStatusCancelled AdvertisementStatus = "cancelled"
+)
+
+type AdvertisementType string
+
+const (
+	AdTypeBuy  AdvertisementType = "buy"
+	AdTypeSell AdvertisementType = "sell"
 )
 
 type OrderStatus string
@@ -37,65 +45,78 @@ const (
 
 // P2PAdvertisement is a seller's offer to sell crypto for IDR.
 type P2PAdvertisement struct {
-	AdvertisementID string              `gorm:"primaryKey;column:advertisement_id"`
-	SellerID        string              `gorm:"column:seller_id;index"`
-	PairID          string              `gorm:"column:pair_id"`        // FK to trading_pairs
-	Price           float64             `gorm:"column:price;type:numeric(36,18)"`
-	MinAmount       float64             `gorm:"column:min_amount;type:numeric(36,18)"`
-	MaxAmount       float64             `gorm:"column:max_amount;type:numeric(36,18)"`
-	PaymentMethod   string              `gorm:"column:payment_method"` // e.g. "BCA", "Mandiri"
-	PaymentWindow   int                 `gorm:"column:payment_window"` // minutes buyer has to pay
+	AdvertisementID string              `json:"advertisement_id" gorm:"primaryKey;column:advertisement_id"`
+	SellerID        string              `json:"seller_id" gorm:"column:seller_id;index"`
+	PairID          string              `json:"pair_id" gorm:"column:pair_id"`        // FK to trading_pairs
+	Type            AdvertisementType   `json:"type" gorm:"column:type;default:sell"`
+	Price           float64             `json:"price" gorm:"column:price;type:numeric(36,18)"`
+	TotalAmount     float64             `json:"total_amount" gorm:"column:total_amount;type:numeric(36,18)"`
+	RemainingAmount float64             `json:"remaining_amount" gorm:"column:remaining_amount;type:numeric(36,18)"`
+	PaymentMethod   string              `json:"payment_method" gorm:"column:payment_method"` // e.g. "BCA", "Mandiri"
+	PaymentWindow   int                 `json:"payment_window" gorm:"column:payment_window"` // minutes buyer has to pay
 	// SellerAddress is the seller's EVM payout address — escrow refunds (cancel,
 	// expiry, dispute-for-seller) are sent here by the on-chain contract.
-	SellerAddress string              `gorm:"column:seller_address"`
-	Status        AdvertisementStatus `gorm:"column:status;default:active"`
-	CreatedAt     time.Time           `gorm:"column:created_at;autoCreateTime"`
+	SellerAddress string              `json:"seller_address" gorm:"column:seller_address"`
+	Status        AdvertisementStatus `json:"status" gorm:"column:status;default:active"`
+	CreatedAt     time.Time           `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+}
+
+func (P2PAdvertisement) TableName() string {
+	return "p2p_advertisements"
 }
 
 // P2POrder is a buyer's order against an advertisement.
 // Crypto is held in an on-chain escrow contract until the seller confirms the
 // buyer's fiat payment (release) or the order is cancelled/expired (refund).
 type P2POrder struct {
-	P2POrderID      string      `gorm:"primaryKey;column:p2p_order_id"`
-	AdvertisementID string      `gorm:"column:advertisement_id;index"`
-	BuyerID         string      `gorm:"column:buyer_id;index"`
-	SellerID        string      `gorm:"column:seller_id;index"`
-	Amount          float64     `gorm:"column:amount;type:numeric(36,18)"`    // crypto amount
+	P2POrderID      string      `json:"p2p_order_id" gorm:"primaryKey;column:p2p_order_id"`
+	AdvertisementID string      `json:"advertisement_id" gorm:"column:advertisement_id;index"`
+	BuyerID         string      `json:"buyer_id" gorm:"column:buyer_id;index"`
+	SellerID        string      `json:"seller_id" gorm:"column:seller_id;index"`
+	Amount          float64     `json:"amount" gorm:"column:amount;type:numeric(36,18)"`    // crypto amount
 	TotalUSD        float64     `json:"total_usd" gorm:"column:total_usd;type:numeric(20,2)"`  // fiat equivalent
-	Status          OrderStatus `gorm:"column:status;default:created"`
-	PaymentProofURL *string     `gorm:"column:payment_proof_url"`
+	Status          OrderStatus `json:"status" gorm:"column:status;default:created"`
+	PaymentProofURL *string     `json:"payment_proof_url" gorm:"column:payment_proof_url"`
 	// EscrowWalletID is the legacy internal-ledger escrow wallet (nullable now
 	// that escrow is on-chain). Kept for backward compatibility.
-	EscrowWalletID *string `gorm:"column:escrow_wallet_id"`
+	EscrowWalletID *string `json:"escrow_wallet_id" gorm:"column:escrow_wallet_id"`
 
 	// ── On-chain escrow fields ───────────────────────────────────────────────
-	BuyerAddress  string `gorm:"column:buyer_address"`  // EVM release destination
-	SellerAddress string `gorm:"column:seller_address"` // EVM refund destination
-	OnChainID     string `gorm:"column:on_chain_id"`    // bytes32 escrow key (hex)
-	EscrowState   string `gorm:"column:escrow_state;default:none"`
-	CreateTxHash  *string `gorm:"column:create_tx_hash"`
-	ReleaseTxHash *string `gorm:"column:release_tx_hash"`
-	RefundTxHash  *string `gorm:"column:refund_tx_hash"`
-	DisputeTxHash *string `gorm:"column:dispute_tx_hash"`
+	BuyerAddress  string `json:"buyer_address" gorm:"column:buyer_address"`  // EVM release destination
+	SellerAddress string `json:"seller_address" gorm:"column:seller_address"` // EVM refund destination
+	OnChainID     string `json:"on_chain_id" gorm:"column:on_chain_id"`    // bytes32 escrow key (hex)
+	EscrowState   string `json:"escrow_state" gorm:"column:escrow_state;default:none"`
+	CreateTxHash  *string `json:"create_tx_hash" gorm:"column:create_tx_hash"`
+	ReleaseTxHash *string `json:"release_tx_hash" gorm:"column:release_tx_hash"`
+	RefundTxHash  *string `json:"refund_tx_hash" gorm:"column:refund_tx_hash"`
+	DisputeTxHash *string `json:"dispute_tx_hash" gorm:"column:dispute_tx_hash"`
 
-	CreatedAt  time.Time  `gorm:"column:created_at;autoCreateTime"`
-	PaidAt     *time.Time `gorm:"column:paid_at"`
-	ReleasedAt *time.Time `gorm:"column:released_at"`
-	ExpiredAt  time.Time  `gorm:"column:expired_at"`
+	CreatedAt  time.Time  `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+	PaidAt     *time.Time `json:"paid_at" gorm:"column:paid_at"`
+	ReleasedAt *time.Time `json:"released_at" gorm:"column:released_at"`
+	ExpiredAt  time.Time  `json:"expired_at" gorm:"column:expired_at"`
+}
+
+func (P2POrder) TableName() string {
+	return "p2p_orders"
 }
 
 // P2PDispute is raised when a buyer/seller cannot resolve a P2POrder themselves.
 type P2PDispute struct {
-	P2PDisputeID string        `gorm:"primaryKey;column:p2p_dispute_id"`
-	P2POrderID   string        `gorm:"column:p2p_order_id;index"`
-	RaisedBy     string        `gorm:"column:raised_by"` // user ID
-	Reason       string        `gorm:"column:reason"`
-	EvidenceURL  *string       `gorm:"column:evidence_url"`
-	Status       DisputeStatus `gorm:"column:status;default:open"`
-	ResolvedBy   *string       `gorm:"column:resolved_by"` // admin user ID
-	Resolution   string        `gorm:"column:resolution;default:''"`
-	ResolvedAt   *time.Time    `gorm:"column:resolved_at"`
-	CreatedAt    time.Time     `gorm:"column:created_at;autoCreateTime"`
+	P2PDisputeID string        `json:"p2p_dispute_id" gorm:"primaryKey;column:p2p_dispute_id"`
+	P2POrderID   string        `json:"p2p_order_id" gorm:"column:p2p_order_id;index"`
+	RaisedBy     string        `json:"raised_by" gorm:"column:raised_by"` // user ID
+	Reason       string        `json:"reason" gorm:"column:reason"`
+	EvidenceURL  *string       `json:"evidence_url" gorm:"column:evidence_url"`
+	Status       DisputeStatus `json:"status" gorm:"column:status;default:open"`
+	ResolvedBy   *string       `json:"resolved_by" gorm:"column:resolved_by"` // admin user ID
+	Resolution   string        `json:"resolution" gorm:"column:resolution;default:''"`
+	ResolvedAt   *time.Time    `json:"resolved_at" gorm:"column:resolved_at"`
+	CreatedAt    time.Time     `json:"created_at" gorm:"column:created_at;autoCreateTime"`
+}
+
+func (P2PDispute) TableName() string {
+	return "p2p_disputes"
 }
 
 // ─── Domain Errors ───────────────────────────────────────────────────────────
@@ -115,12 +136,15 @@ var (
 	ErrInvalidState     = errors.New("order is not in a valid state for this action")
 	ErrInvalidAddress   = errors.New("a valid EVM payout address is required")
 	ErrInvalidInput     = errors.New("invalid input")
+	ErrInsufficientFunds     = errors.New("insufficient funds")
+	ErrCryptoAddressNotFound = errors.New("crypto address not generated for user")
 )
 
 // ─── Filters & DTOs ────────────────────────────────────────────────────────
 
 // AdFilter narrows an advertisement listing query. Empty fields are ignored.
 type AdFilter struct {
+	Type          AdvertisementType
 	PairID        string
 	PaymentMethod string
 	Status        AdvertisementStatus
@@ -130,10 +154,10 @@ type AdFilter struct {
 
 // CreateAdInput is the payload to post a sell advertisement.
 type CreateAdInput struct {
+	Type          AdvertisementType
 	PairID        string
 	Price         float64
-	MinAmount     float64
-	MaxAmount     float64
+	Amount        float64
 	PaymentMethod string
 	PaymentWindow int    // minutes
 }
@@ -179,6 +203,7 @@ type Repository interface {
 	GetAd(ctx context.Context, id string) (*P2PAdvertisement, error)
 	ListAds(ctx context.Context, f AdFilter) ([]P2PAdvertisement, error)
 	ListAdsBySeller(ctx context.Context, sellerID string) ([]P2PAdvertisement, error)
+	UpdateAd(ctx context.Context, ad *P2PAdvertisement) error
 	UpdateAdStatus(ctx context.Context, id string, status AdvertisementStatus) error
 
 	// Orders

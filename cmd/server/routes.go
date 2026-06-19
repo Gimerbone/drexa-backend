@@ -119,14 +119,14 @@ func addRoutes(
 	mux.Handle("GET /api/v1/p2p/ads/{id}", jwt(http.HandlerFunc(p2pH.GetAd)))
 	mux.Handle("POST /api/v1/p2p/ads", jwt(http.HandlerFunc(p2pH.CreateAd)))
 	// GET /mine must come before /{id} to avoid collision
-	mux.Handle("GET /api/v1/p2p/ads/mine/list", jwt(http.HandlerFunc(p2pH.MyAds))) // note: standard net/http mux does exact match or trailing slash
-	mux.Handle("PATCH /api/v1/p2p/ads/{id}/status", jwt(http.HandlerFunc(p2pH.SetAdStatus)))
+	mux.Handle("GET /api/v1/p2p/ads/mine", jwt(http.HandlerFunc(p2pH.MyAds))) // note: standard net/http mux does exact match or trailing slash
+	mux.Handle("POST /api/v1/p2p/ads/{id}/status", jwt(http.HandlerFunc(p2pH.SetAdStatus)))
 
 	mux.Handle("POST /api/v1/p2p/orders", jwt(http.HandlerFunc(p2pH.CreateOrder)))
-	mux.Handle("GET /api/v1/p2p/orders/mine/list", jwt(http.HandlerFunc(p2pH.MyOrders)))
+	mux.Handle("GET /api/v1/p2p/orders/mine", jwt(http.HandlerFunc(p2pH.MyOrders)))
 	mux.Handle("GET /api/v1/p2p/orders/{id}", jwt(http.HandlerFunc(p2pH.GetOrder)))
 	mux.Handle("GET /api/v1/p2p/orders/{id}/escrow", jwt(http.HandlerFunc(p2pH.EscrowInfo)))
-	mux.Handle("POST /api/v1/p2p/orders/{id}/pay", jwt(http.HandlerFunc(p2pH.MarkPaid)))
+	mux.Handle("POST /api/v1/p2p/orders/{id}/paid", jwt(http.HandlerFunc(p2pH.MarkPaid)))
 	mux.Handle("POST /api/v1/p2p/orders/{id}/release", jwt(http.HandlerFunc(p2pH.ReleaseOrder)))
 	mux.Handle("POST /api/v1/p2p/orders/{id}/cancel", jwt(http.HandlerFunc(p2pH.CancelOrder)))
 	mux.Handle("POST /api/v1/p2p/orders/{id}/dispute", jwt(http.HandlerFunc(p2pH.OpenDispute)))
