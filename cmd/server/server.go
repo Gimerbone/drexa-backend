@@ -331,7 +331,21 @@ func (a *p2pWalletAdapter) CreditBalance(ctx context.Context, userID, currency s
 	return a.tx.Do(ctx, func(ctx context.Context) error {
 		w, err := a.walletRepo.FindByUserAndCurrency(ctx, userID, wallet.CurrencyCode(currency))
 		if err != nil {
-			return err
+			if err == wallet.ErrWalletNotFound {
+				w = &wallet.Wallet{
+					WalletID:  uuid.NewString(),
+					UserID:    userID,
+					Currency:  wallet.CurrencyCode(currency),
+					Status:    wallet.WalletStatusActive,
+					CreatedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				}
+				if err := a.walletRepo.Create(ctx, w); err != nil {
+					return err
+				}
+			} else {
+				return err
+			}
 		}
 		wLock, err := a.walletRepo.FindByIDForUpdate(ctx, w.WalletID)
 		if err != nil {

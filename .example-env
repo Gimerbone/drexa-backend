@@ -126,15 +126,15 @@ DIDIT_WORKFLOW_ID=3b3ef226-0f3f-49cb-9be6-9fbfc19a0885
 # Public testnet (Sepolia): your Infura/Alchemy HTTPS URL.
 # Leave ESCROW_RPC_URL / ESCROW_CONTRACT_ADDRESS / ESCROW_PRIVATE_KEY empty to
 # disable on-chain escrow (P2P escrow endpoints return a "not configured" error).
-ESCROW_RPC_URL=http://127.0.0.1:8545
-# 0 = auto-detect from the node (Hardhat=31337, Sepolia=11155111).
-ESCROW_CHAIN_ID=0
-# Platform signer = the P2PEscrow contract's arbiter (SECRET; never log/expose).
-# Local dev: the Hardhat account #0 test key (no real funds).
-ESCROW_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-# Hardcoded for local dev because the first deployment is deterministic.
-ESCROW_CONTRACT_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3
-ESCROW_CONFIRM_TIMEOUT=90s
+# ESCROW_RPC_URL=http://127.0.0.1:8545
+# # 0 = auto-detect from the node (Hardhat=31337, Sepolia=11155111).
+# ESCROW_CHAIN_ID=0
+# # Platform signer = the P2PEscrow contract's arbiter (SECRET; never log/expose).
+# # Local dev: the Hardhat account #0 test key (no real funds).
+# ESCROW_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+# # Hardcoded for local dev because the first deployment is deterministic.
+# ESCROW_CONTRACT_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3
+# ESCROW_CONFIRM_TIMEOUT=90s
 
 
 # ===================
